@@ -1,0 +1,113 @@
+name: Check upstream bb release
+
+on:
+  schedule:
+    - cron: "17 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: check-upstream-bb-release
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout package repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install packaging tools
+        run: pacman -Syu --noconfirm git github-cli pacman-contrib
+
+      - name: Find latest stable desktop release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_REPOSITORY: get-bb/bb
+        run: |
+          set -euo pipefail
+          tag="$(gh api "repos/$UPSTREAM_REPOSITORY/releases/latest" --jq '.tag_name')"
+          case "$tag" in
+            desktop-v*) version="${tag#desktop-v}" ;;
+            *)
+              echo "::error::Expected a desktop-v* release tag, got $tag."
+              exit 1
+              ;;
+          esac
+
+          asset="bb-$version-x86_64.AppImage"
+          gh api "repos/$UPSTREAM_REPOSITORY/releases/tags/$tag" --jq '.assets[].name' \
+            | grep -Fx "$asset" >/dev/null
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Update and validate package
+        id: update
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          branch="automation/update-bb-bin-$VERSION"
+          git fetch origin "$branch" || true
+          if git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+            git switch --force-create "$branch" "origin/$branch"
+          else
+            git switch --create "$branch"
+          fi
+
+          current_version="$(sed -n 's/^pkgver=//p' PKGBUILD)"
+          if [ "$current_version" = "$VERSION" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          sed -i -E "s/^pkgver=.*/pkgver=$VERSION/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          updpkgsums
+          makepkg --printsrcinfo > .SRCINFO
+          git diff --check
+
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          runuser -u builder -- env HOME=/home/builder \
+            bash -lc "cd '$GITHUB_WORKSPACE' && makepkg --cleanbuild --force"
+          chown -R root:root "$GITHUB_WORKSPACE"
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit update and open pull request
+        if: ${{ steps.update.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          branch="automation/update-bb-bin-$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          git commit -m "Update bb-bin to $VERSION"
+          git push --set-upstream origin "$branch"
+
+          if [ "$(gh pr list --head "$branch" --state open --json number --jq 'length')" = "0" ]; then
+            gh pr create \
+              --base master \
+              --head "$branch" \
+              --title "Update bb-bin to $VERSION" \
+              --body "## What changed
+
+Updates the pinned bb AppImage source and checksum to desktop-v$VERSION.
+
+## How you verified
+
+Ran \`makepkg --cleanbuild --force\` in an Arch Linux container.
+
+> AGENT GENERATED"
+          fi

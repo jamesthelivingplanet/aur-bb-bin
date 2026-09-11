@@ -1,0 +1,59 @@
+name: Publish AUR package
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - PKGBUILD
+      - .SRCINFO
+      - LICENSE
+      - bb-launcher.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-aur-package
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout package repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install packaging tools
+        run: pacman -Syu --noconfirm git openssh pacman-contrib
+
+      - name: Build package
+        run: |
+          set -euo pipefail
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          runuser -u builder -- env HOME=/home/builder \
+            bash -lc "cd '$GITHUB_WORKSPACE' && makepkg --cleanbuild --force"
+          chown -R root:root "$GITHUB_WORKSPACE"
+
+      - name: Push package recipe to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$AUR_SSH_PRIVATE_KEY"
+
+          key_file="$(mktemp)"
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          install -d -m 700 ~/.ssh
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+
+          git remote add aur ssh://aur@aur.archlinux.org/bb-bin.git
+          GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes" \
+            git push aur HEAD:master
