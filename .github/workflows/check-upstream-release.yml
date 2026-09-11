@@ -39,6 +39,7 @@ jobs:
             git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           else
             git init
+            git clean -fdx
             git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           fi
           git fetch --prune origin "+refs/heads/*:refs/remotes/origin/*"
