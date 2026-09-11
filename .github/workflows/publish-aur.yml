@@ -54,6 +54,7 @@ jobs:
           install -d -m 700 ~/.ssh
           ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
 
+          cd "$GITHUB_WORKSPACE"
           git remote add aur ssh://aur@aur.archlinux.org/bb-bin.git
           GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes" \
             git push aur HEAD:master
