@@ -65,13 +65,13 @@ jobs:
           test -n "$AUR_SSH_PRIVATE_KEY"
 
           key_file="$(mktemp)"
-          trap 'rm -f "$key_file"' EXIT
+          known_hosts_file="$(mktemp)"
+          trap 'rm -f "$key_file" "$known_hosts_file"' EXIT
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$key_file"
           chmod 600 "$key_file"
-          install -d -m 700 ~/.ssh
-          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+          ssh-keyscan -t ed25519 aur.archlinux.org > "$known_hosts_file"
 
           cd "$GITHUB_WORKSPACE"
           git remote add aur ssh://aur@aur.archlinux.org/bb-bin.git
-          GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes" \
+          GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file" \
             git push aur HEAD:master
