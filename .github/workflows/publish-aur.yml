@@ -31,6 +31,21 @@ jobs:
       - name: Install packaging tools
         run: pacman -Syu --noconfirm git openssh pacman-contrib
 
+      - name: Restore Git metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          if [ -d .git ]; then
+            git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          else
+            git init
+            git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+          git fetch --prune origin "+refs/heads/*:refs/remotes/origin/*"
+          git switch --force-create master origin/master
+
       - name: Build package
         run: |
           set -euo pipefail
