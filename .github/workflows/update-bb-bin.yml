@@ -119,17 +119,15 @@ jobs:
           git push --set-upstream origin "$branch"
 
           if [ "$(gh pr list --head "$branch" --state open --json number --jq 'length')" = "0" ]; then
+            body="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s' \
+              '## What changed' \
+              "Updates the pinned bb AppImage source and checksum to desktop-v$VERSION." \
+              '## How you verified' \
+              'Ran makepkg --cleanbuild --force in an Arch Linux container.' \
+              '> AGENT GENERATED')"
             gh pr create \
               --base master \
               --head "$branch" \
               --title "Update bb-bin to $VERSION" \
-              --body "## What changed
-
-Updates the pinned bb AppImage source and checksum to desktop-v$VERSION.
-
-## How you verified
-
-Ran \`makepkg --cleanbuild --force\` in an Arch Linux container.
-
-> AGENT GENERATED"
+              --body "$body"
           fi
