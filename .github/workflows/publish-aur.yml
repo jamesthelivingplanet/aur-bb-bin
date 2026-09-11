@@ -71,7 +71,26 @@ jobs:
           chmod 600 "$key_file"
           ssh-keyscan -t ed25519 aur.archlinux.org > "$known_hosts_file"
 
-          cd "$GITHUB_WORKSPACE"
-          git remote add aur ssh://aur@aur.archlinux.org/bb-bin.git
-          GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file" \
-            git push aur HEAD:master
+          aur_checkout="$(mktemp -d)"
+          trap 'rm -f "$key_file" "$known_hosts_file"; rm -rf "$aur_checkout"' EXIT
+          export GIT_SSH_COMMAND="ssh -i $key_file -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file"
+
+          # The AUR accepts only package files at the repository root. Keep the
+          # GitHub-only workflow files out of the AUR checkout.
+          git clone ssh://aur@aur.archlinux.org/bb-bin.git "$aur_checkout"
+          cp "$GITHUB_WORKSPACE/PKGBUILD" "$aur_checkout/PKGBUILD"
+          cp "$GITHUB_WORKSPACE/.SRCINFO" "$aur_checkout/.SRCINFO"
+          cp "$GITHUB_WORKSPACE/LICENSE" "$aur_checkout/LICENSE"
+          cp "$GITHUB_WORKSPACE/bb-launcher.sh" "$aur_checkout/bb-launcher.sh"
+
+          cd "$aur_checkout"
+          if git diff --quiet -- PKGBUILD .SRCINFO LICENSE bb-launcher.sh; then
+            echo "AUR package recipe is already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- PKGBUILD .SRCINFO LICENSE bb-launcher.sh
+          git commit -m "Update bb-bin package"
+          git push origin HEAD:master
