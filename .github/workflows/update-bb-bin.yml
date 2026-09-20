@@ -92,15 +92,12 @@ jobs:
           fi
 
           sed -i -E "s/^pkgver=.*/pkgver=$VERSION/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
-          updpkgsums
-          makepkg --printsrcinfo > .SRCINFO
-          git diff --check
-
           useradd --create-home builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
           runuser -u builder -- env HOME=/home/builder \
-            bash -lc "cd '$GITHUB_WORKSPACE' && makepkg --cleanbuild --force"
+            bash -lc "cd '$GITHUB_WORKSPACE' && updpkgsums && makepkg --printsrcinfo > .SRCINFO && makepkg --cleanbuild --force"
           chown -R root:root "$GITHUB_WORKSPACE"
+          git diff --check
 
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
