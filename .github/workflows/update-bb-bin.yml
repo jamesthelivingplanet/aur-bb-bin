@@ -81,13 +81,19 @@ jobs:
           git fetch origin "$branch" || true
           if git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
             git switch --force-create "$branch" "origin/$branch"
+            branch_exists=true
           else
             git switch --create "$branch"
+            branch_exists=false
           fi
 
           current_version="$(sed -n 's/^pkgver=//p' PKGBUILD)"
           if [ "$current_version" = "$VERSION" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            if [ "$branch_exists" = true ]; then
+              echo "update_state=existing" >> "$GITHUB_OUTPUT"
+            else
+              echo "update_state=none" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
@@ -99,21 +105,24 @@ jobs:
           chown -R root:root "$GITHUB_WORKSPACE"
           git diff --check
 
-          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "update_state=new" >> "$GITHUB_OUTPUT"
 
       - name: Commit update and open pull request
-        if: ${{ steps.update.outputs.changed == 'true' }}
+        if: ${{ steps.update.outputs.update_state != 'none' }}
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.release.outputs.version }}
+          UPDATE_STATE: ${{ steps.update.outputs.update_state }}
         run: |
           set -euo pipefail
           branch="automation/update-bb-bin-$VERSION"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add PKGBUILD .SRCINFO
-          git commit -m "Update bb-bin to $VERSION"
-          git push --set-upstream origin "$branch"
+          if [ "$UPDATE_STATE" = "new" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add PKGBUILD .SRCINFO
+            git commit -m "Update bb-bin to $VERSION"
+            git push --set-upstream origin "$branch"
+          fi
 
           if [ "$(gh pr list --head "$branch" --state open --json number --jq 'length')" = "0" ]; then
             body="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s' \
